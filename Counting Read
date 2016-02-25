@@ -1,0 +1,4 @@
+featureCounts -t exon -g gene_id -a RefSeq_genes_ce10.gtf -o RefSeq.counts SRR359063.bam
+
+The output contains the following information:
+Gene ID | exon_chroms | exon_starts | exon_ends | exon_strands | transcript_length | read_count
