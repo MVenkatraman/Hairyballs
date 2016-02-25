@@ -2,7 +2,8 @@
 #   WGNCA
 ###################
 
-#### Data input, cleaning and pre-processing 
+#### Data input, cleaning and pre-processing ####
+
 
 # they suggest doing varianceStabilizing in Deseq before inputting data
 # for now lets log transform the RPKMs
@@ -81,9 +82,13 @@ gsg = goodSamplesGenes(curated, verbose = 3)
 gsg$allOK
 # theyre all okay
 
+### create data expression table 
+
+expressed = as.data.frame(t(curated))
+
 # now we are clustering the samples using hierachical clustering
 # doing this to detect outliers
-tree = hclust(dist(curated), method = "average")
+tree = hclust(dist(expressed), method = "average")
 
 # plotting time 
 
@@ -92,9 +97,256 @@ plot(tree, main = "Sample clustering to detect outliers")
 abline(h = 15, col = "red");
 # everything is under the cutoff 
 
-### create data expression table 
-
-expressed = as.data.frame(t(curated))
 
 ##### creating trait table 
-chickennames = rows
+traits = as.data.frame(list(1:8))
+rownames(traits) = rownames(expressed)
+colnames(traits) = "Population"
+traits[,1] = c(1, 1, 2, 2, 2, 2, 1, 1)
+
+
+### now re cluster 
+tree2 = hclust(dist(expressed), method = "average")
+traitColors = numbers2colors(traits[,1], signed = FALSE);
+
+plotDendroAndColors(tree2, traitColors, groupLabels = names(traits), main = "Sample dendrogram and trait heatmap")
+
+### save data
+save(expression, traits, file = "chicken_input.RData")
+
+##### Module construction #####
+###############################
+
+
+# this is important
+options(stringsAsFactors = FALSE)
+
+## load the names of your variables in your data
+lnames = load(file = "chicken_input.RData")
+
+###### choose a soft threshold power ######
+# the threshold for co-expression similarity
+
+# first pick a set of soft t powers
+powers = c(c(1:10), seq(from = 12, to=20, by=2))
+
+# Call the network topology analysis function
+sft = pickSoftThreshold(expressed, powerVector = powers, verbose = 5)
+
+# now we want to plot the results
+sizeGrWindow(9, 5)
+par(mfrow = c(1,2))
+cex1 = 0.9
+
+# Scale-free topology fit index as a function of the soft-thresholding power
+
+plot(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+     xlab="Soft Threshold (power)",ylab="Scale Free Topology Model Fit,signed R^2",type="n",
+     main = paste("Scale independence"))
+text(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+     labels=powers,cex=cex1,col="red")
+
+# this line corresponds to using an R^2 cut-off of h
+# we're adding a cutoff line
+abline(h=0.90,col="blue")
+
+
+# Mean connectivity as a function of the soft-thresholding power
+plot(sft$fitIndices[,1], sft$fitIndices[,5],
+     xlab="Soft Threshold (power)",ylab="Mean Connectivity", type="n",
+     main = paste("Mean connectivity"))
+text(sft$fitIndices[,1], sft$fitIndices[,5], labels=powers, cex=cex1,col="red")
+
+## so i choose the value 16 b/c it is the lowest value for which the scalefree top
+# reaches 0.9
+
+## now calculate adjacencies using the soft t power of 16
+
+softPower = 16
+adjacency = adjacency(expressed, power = softPower)
+
+# to minimize noise we convert adjacency to topographical overlap network. 
+TOM = TOMsimilarity(adjacency);
+# now we calculate dissimilarity
+dissTOM = 1-TOM
+
+### clustering the tom
+# WGCNA masks hclust with a faster hclust
+geneTree = hclust(as.dist(dissTOM), method = "average");
+
+sizeGrWindow(12,9)
+plot(geneTree, xlab="", sub="", main = "Gene clustering on TOM-based dissimilarity",
+     labels = FALSE, hang = 0.04)
+# hang = The fraction of the plot height by which labels should hang below the rest of the plot
+
+## so we have a hanging tree that has densely connected areas that are correlated genes
+# we need to cut it up to only get the correlated genes
+
+#### We use dynamic tree cut
+
+# lets choose an big sized module = 30
+minModuleSize = 30
+dynamicMods = cutreeDynamic(dendro = geneTree, distM = dissTOM,
+                            deepSplit = 2, pamRespectsDendro = FALSE,
+                            minClusterSize = minModuleSize)
+
+table(dynamicMods)
+# it gave me 72 modules, the above function tells you the size of the modules
+# label 0 is unassinged genes 
+
+# Convert numeric lables into colors
+dynamicColors = labels2colors(dynamicMods)
+table(dynamicColors)
+
+# lets plot dendogram with colors
+par(mfrow=c(1,1))
+sizeGrWindow(8,6)
+plotDendroAndColors(geneTree, dynamicColors, "Dynamic Tree Cut",
+                    dendroLabels = FALSE, hang = 0.03,
+                    addGuide = TRUE, guideHang = 0.05,
+                    main = "Gene dendrogram and module colors")
+# literally the coolest thing ever
+
+### now lets merge modules whose expression profile is similar
+# calculating eigengenes, which is kinda just pc1
+MEList = moduleEigengenes(expressed, colors = dynamicColors)
+MEs = MEList$eigengenes
+
+# calculate dissimilarity of modules
+MEDiss = 1-cor(MEs)
+
+# now we cluster the eigengenes
+METree = hclust(as.dist(MEDiss), method = "average")
+sizeGrWindow(7, 6)
+plot(METree, main = "Clustering of module eigengenes", xlab = "", sub = "")
+
+# we need to pick a correlation threshold
+# we pick .75
+
+MEDissThres = 0.25
+abline(h=MEDissThres, col = "red")
+
+## merging correlated modules
+merge = mergeCloseModules(expressed, dynamicColors, cutHeight = MEDissThres, verbose = 3)
+
+# give the merged modules colors
+mergedColors = merge$colors
+
+# Eigengenes of the new merg
+mergedMEs = merge$newMEs
+
+### so lets see what happened with the merging, we plot geneTree again
+plotDendroAndColors(geneTree, cbind(dynamicColors, mergedColors),
+                    c("Dynamic Tree Cut", "Merged dynamic"),
+                    dendroLabels = FALSE, hang = 0.03,
+                    addGuide = TRUE, guideHang = 0.05)
+
+# renames mergecolors
+moduleColors = mergedColors
+# Construct numerical labels corresponding to the colors
+colorOrder = c("grey", standardColors(50))
+moduleLabels = match(moduleColors, colorOrder)-1
+MEs = mergedMEs
+# Save module colors and labels for use in subsequent parts
+save(MEs, moduleLabels, moduleColors, geneTree, file = "networkconstruct.RData")
+
+##### Trait Correlation ######
+###############################
+
+nGenes = ncol(expressed)
+nSamples = nrow(expressed)
+
+# Recalculate MEs with color labels
+MEs0 = moduleEigengenes(expressed, moduleColors)$eigengenes
+# correlate trait and eigengenes
+MEs = orderMEs(MEs0)
+moduleTraitCor = cor(MEs, traits, use = "p")
+moduleTraitPvalue = corPvalueStudent(moduleTraitCor, nSamples)
+
+sizeGrWindow(10,6)
+# display correlations and their p-values
+textMatrix = paste(signif(moduleTraitCor, 2), "\n(",
+                   signif(moduleTraitPvalue, 1), ")", sep = "")
+dim(textMatrix) = dim(moduleTraitCor)
+par(mar = c(6, 8.5, 3, 3))
+
+# Display the correlation values within a heatmap plot
+labeledHeatmap(Matrix = moduleTraitCor,
+               xLabels = names(traits),
+               yLabels = names(MEs),
+               ySymbols = names(MEs),
+               colorLabels = FALSE,
+               colors = greenWhiteRed(50),
+               textMatrix = textMatrix,
+               setStdMargins = FALSE,
+               cex.text = 0.5,
+               zlim = c(-1,1),
+               main = paste("Module-trait relationships"))
+
+### Gene Significance and Module Membership
+# GS = absolute correlation between gene and trait
+# MM = the correlation of the module eigengene and the gene expression profile
+
+# Define variable weight containing the weight column of datTrait
+pop = as.data.frame(traits$Population)
+names(pop) = "pop"
+
+# names (colors) of the modules
+modNames = substring(names(MEs), 3)
+
+# calculate MM
+geneModuleMembership = as.data.frame(cor(expressed, MEs, use = "p"))
+MMPvalue = as.data.frame(corPvalueStudent(as.matrix(geneModuleMembership), nSamples))
+names(geneModuleMembership) = paste("MM", modNames, sep="")
+names(MMPvalue) = paste("p.MM", modNames, sep="")
+
+# calculate GS
+geneTraitSignificance = as.data.frame(cor(expressed, pop, use = "p"));
+GSPvalue = as.data.frame(corPvalueStudent(as.matrix(geneTraitSignificance), nSamples))
+
+names(geneTraitSignificance) = paste("GS.", names(pop), sep="");
+names(GSPvalue) = paste("p.GS.", names(pop), sep="")
+
+### identify genes with high GS and MM
+## we will look at the sienna3 module
+
+module = "thistle2"
+column = match(module, modNames)
+moduleGenes = moduleColors==module
+
+sizeGrWindow(7, 7);
+par(mfrow = c(1,1));
+verboseScatterplot(abs(geneModuleMembership[moduleGenes, column]),
+                   abs(geneTraitSignificance[moduleGenes, 1]),
+                   xlab = paste("Module Membership in", module, "module"),
+                   ylab = "Gene significance for population",
+                   main = paste("Module membership vs. gene significance\n"),
+                   cex.main = 1.2, cex.lab = 1.2, cex.axis = 1.2, col = module)
+
+names(expressed)[moduleColors=="thistle2"]
+
+
+######### export data
+genenames = names(expressed)
+
+geneInfo0 = data.frame(moduleColor = moduleColors, 
+                       geneTraitSignificance, GSPvalue)
+
+# Order modules by their significance for weight
+modOrder = order(-abs(cor(MEs, pop, use = "p")))
+
+for (mod in 1:ncol(geneModuleMembership))
+{
+  oldNames = names(geneInfo0)
+  geneInfo0 = data.frame(geneInfo0, geneModuleMembership[, modOrder[mod]],
+                         MMPvalue[, modOrder[mod]]);
+  names(geneInfo0) = c(oldNames, paste("MM.", modNames[modOrder[mod]], sep=""),
+                       paste("p.MM.", modNames[modOrder[mod]], sep=""))
+}
+
+# Order the genes in the geneInfo variable first by module color, then by geneTraitSignificance
+geneOrder = order(geneInfo0$moduleColor, -abs(geneInfo0$GS.pop));
+geneInfo = geneInfo0[geneOrder, ]
+
+write.csv(geneInfo, file = "geneInfo.csv")
+
