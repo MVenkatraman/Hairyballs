@@ -118,12 +118,6 @@ save(expression, traits, file = "chicken_input.RData")
 ###############################
 
 
-# this is important
-options(stringsAsFactors = FALSE)
-
-## load the names of your variables in your data
-lnames = load(file = "chicken_input.RData")
-
 ###### choose a soft threshold power ######
 # the threshold for co-expression similarity
 
@@ -349,4 +343,65 @@ geneOrder = order(geneInfo0$moduleColor, -abs(geneInfo0$GS.pop));
 geneInfo = geneInfo0[geneOrder, ]
 
 write.csv(geneInfo, file = "geneInfo.csv")
+
+#######################
+# Subset the modules 
+#######################
+
+# get the modules that have genes that have GS p values < 0.05
+
+head(geneInfo)
+dimdim = dim(geneInfo)
+
+sub_module = subset(geneInfo$moduleColor, geneInfo$p.GS.pop < 0.05)
+mods = unique(sub_module)
+length(mods)
+
+important = subset(geneInfo, geneInfo$moduleColor %in% mods)
+
+### now subset this set by modules that show strong module-trait relationships
+
+moddy = as.data.frame(moduleTraitCor)
+modtraithigh = subset(rownames(moddy) , moddy[,1] >= 0.5 | moddy[,1] <= -0.5)
+
+# get rid of the ME part
+modtraithigh = gsub("ME","",modtraithigh)
+
+finalsub = subset(important, important$moduleColor %in% modtraithigh)
+finalmods = unique(finalsub$moduleColor)
+
+
+# look at the size of the modules
+length(subset(finalsub$moduleColor, finalsub$moduleColor == "honeydew1"))
+
+
+##################################
+# Extract data from visualization
+##################################
+
+# finalmods is the list of modules we want
+
+# extract subset by color and top 30 hub genes 
+
+subsetTOM = function(i, j){
+  damod = as.character(i)
+  inModule = (moduleColors==damod)
+  modjames = danames[inModule]
+  modTOM = TOM[inModule, inModule]
+  head(modTOM)
+  dimnames(modTOM) = list(modjames, modjames)
+  nTop = j
+  IMConn = softConnectivity(expressed[, modjames])
+  top = (rank(-IMConn) <= nTop)
+  modTOMTOM = modTOM[top,top]
+  tomtom <- as.data.frame(as.table(modTOMTOM))
+  return(tomtom)
+}
+
+# lets try cyan
+cyan <- subsetTOM("cyan", 30)
+View(cyan)
+
+darkred <- subsetTOM("darkred",30)
+
 
