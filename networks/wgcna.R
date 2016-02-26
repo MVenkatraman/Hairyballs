@@ -372,7 +372,7 @@ finalmods = unique(finalsub$moduleColor)
 
 
 # look at the size of the modules
-length(subset(finalsub$moduleColor, finalsub$moduleColor == "honeydew1"))
+length(subset(finalsub$moduleColor, finalsub$moduleColor == "plum2"))
 
 
 ##################################
@@ -381,9 +381,10 @@ length(subset(finalsub$moduleColor, finalsub$moduleColor == "honeydew1"))
 
 # finalmods is the list of modules we want
 
-# extract subset by color and top 30 hub genes 
+# extract subset by color (i) and top hub genes (j). and get rid of self correlation
+# and drop low weights (k)
 
-subsetTOM = function(i, j){
+subsetTOM = function(i, j, k=0){
   damod = as.character(i)
   inModule = (moduleColors==damod)
   modjames = danames[inModule]
@@ -395,13 +396,24 @@ subsetTOM = function(i, j){
   top = (rank(-IMConn) <= nTop)
   modTOMTOM = modTOM[top,top]
   tomtom <- as.data.frame(as.table(modTOMTOM))
+  colnames(tomtom) = c("Gene1", "Gene2", "Weights")
+  tomtom = tomtom[!(tomtom$Gene1 == tomtom$Gene2), ]
+  tomtom = tomtom[!(tomtom$Weight < k), ]
   return(tomtom)
 }
 
+##################################
+# Finding the correct threshold 
+##################################
+# k in subsetTOM
+
+hist(cyan$Weight, breaks = 30 , col = "salmon", axes = F)
+axis(1, at = seq(from = 0, to = 1, by = 0.05), tick = T)
+
 # lets try cyan
-cyan <- subsetTOM("cyan", 30)
+cyan <- subsetTOM("cyan", 30, 0.06)
 View(cyan)
 
-darkred <- subsetTOM("darkred",30)
+write.table(cyan, file = "cyanfull.txt", sep = "\t", row.names = FALSE, quote = FALSE)
 
 
