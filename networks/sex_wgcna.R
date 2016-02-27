@@ -1,6 +1,8 @@
-###################
-#   WGNCA
-###################
+#################################
+#  Generating Modules in WGCNA
+#################################
+# Madhvi Venkatraman
+# 2/27/2015
 
 #### Data input, cleaning and pre-processing ####
 
